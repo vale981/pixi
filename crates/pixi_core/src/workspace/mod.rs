@@ -1,4 +1,5 @@
 mod conda_pypi_map;
+mod dependency_overrides;
 mod discovery;
 mod environment;
 pub mod errors;

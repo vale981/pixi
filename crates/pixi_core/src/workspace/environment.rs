@@ -520,6 +520,24 @@ impl<'p> Environment<'p> {
     pub fn channel_config(&self) -> ChannelConfig {
         self.workspace().channel_config()
     }
+
+    /// Returns the combined dependencies to install for this environment,
+    /// with any locally configured `dependency-overrides` (see
+    /// `.pixi/config.toml`) applied on top.
+    ///
+    /// This takes priority over calling the [`FeaturesExt::combined_dependencies`]
+    /// trait method directly on an [`Environment`], since Rust resolves an
+    /// inherent method before a trait method of the same name.
+    pub fn combined_dependencies(
+        &self,
+        platform: Option<&PixiPlatform>,
+    ) -> manifest::CondaDependencies {
+        super::dependency_overrides::apply_dependency_overrides(
+            FeaturesExt::combined_dependencies(self, platform),
+            &self.workspace().config().dependency_overrides,
+            self.workspace().root(),
+        )
+    }
 }
 
 /// Whether two virtual-package lists hold the same entries, order-independent.

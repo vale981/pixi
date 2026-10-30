@@ -18,6 +18,9 @@ pub use rattler_config::locations::{
     ConfigLayer, ConfigLocation, shared_system_config_path, shared_user_config_paths,
 };
 
+mod dependency_overrides;
+pub use dependency_overrides::DependencyOverridesMap;
+
 mod detector_decisions;
 pub use detector_decisions::{
     DetectorConfigError, consent_origin, repository_detector_config_path, write_detector_decision,
@@ -1277,6 +1280,15 @@ pub struct Config {
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub mirrors: HashMap<Url, Vec<Url>>,
 
+    /// Per-developer overrides of where specific dependencies are fetched
+    /// from (e.g. a local path or git checkout instead of a published
+    /// package, or a private dev channel), keyed by package name. An
+    /// override only replaces the source of a dependency that is already
+    /// declared somewhere in the workspace manifest.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "DependencyOverridesMap::is_empty")]
+    pub dependency_overrides: DependencyOverridesMap,
+
     /// Dependency Pinning strategy used for dependency modification through
     /// automated logic like `pixi add`
     // TODO(rattler-config): promote — useful for any tool that
@@ -1415,6 +1427,7 @@ impl Default for Config {
             tls_root_certs: None,
             offline: None,
             mirrors: HashMap::new(),
+            dependency_overrides: DependencyOverridesMap::default(),
             loaded_from: Vec::new(),
             channel_config: default_channel_config(),
             repodata_config: RepodataConfig::default(),
@@ -2185,6 +2198,16 @@ impl Config {
             "concurrency.downloads",
             "concurrency.solves",
             "default-channels",
+            "dependency-overrides",
+            "dependency-overrides.<package>",
+            "dependency-overrides.<package>.version",
+            "dependency-overrides.<package>.channel",
+            "dependency-overrides.<package>.path",
+            "dependency-overrides.<package>.git",
+            "dependency-overrides.<package>.branch",
+            "dependency-overrides.<package>.tag",
+            "dependency-overrides.<package>.rev",
+            "dependency-overrides.<package>.subdirectory",
             "detached-environments",
             "experimental",
             "experimental.conda-script",
@@ -2257,6 +2280,14 @@ impl Config {
                 .or(self.authentication_override_file),
             // Extended self.mirrors with other.mirrors
             mirrors: self.mirrors,
+            // `other`'s override for a given package fully replaces `self`'s.
+            dependency_overrides: DependencyOverridesMap(
+                self.dependency_overrides
+                    .0
+                    .into_iter()
+                    .chain(other.dependency_overrides.0)
+                    .collect(),
+            ),
             loaded_from: other.loaded_from,
             channel_config: if other.channel_config == default_channel_config() {
                 self.channel_config
@@ -3564,6 +3595,28 @@ UNUSED = "unused"
     }
 
     #[test]
+    fn test_dependency_overrides_parse() {
+        let toml = r#"
+            [dependency-overrides]
+            numpy = { path = "../numpy" }
+            scipy = "1.2.*"
+            my-private-pkg = { version = "*", channel = "https://repo.prefix.dev/my-dev-channel" }
+        "#;
+        let (config, _) = Config::from_toml(toml, None).unwrap();
+        let overrides = config.dependency_overrides.0;
+
+        assert_eq!(
+            overrides["numpy"],
+            serde_json::json!({ "path": "../numpy" })
+        );
+        assert_eq!(overrides["scipy"], serde_json::json!("1.2.*"));
+        assert_eq!(
+            overrides["my-private-pkg"],
+            serde_json::json!({ "version": "*", "channel": "https://repo.prefix.dev/my-dev-channel" })
+        );
+    }
+
+    #[test]
     fn test_default_config() {
         let config = Config::default();
         // This depends on the system so it's hard to test.
@@ -3765,6 +3818,10 @@ UNUSED = "unused"
                 Url::parse("https://conda.anaconda.org/conda-forge").unwrap(),
                 Vec::default(),
             )]),
+            dependency_overrides: DependencyOverridesMap(IndexMap::from([(
+                "numpy".to_string(),
+                serde_json::json!({ "path": "../numpy" }),
+            )])),
             pinning_strategy: Some(PinningStrategy::NoPin),
             experimental: ExperimentalConfig {
                 use_environment_activation_cache: Some(true),
